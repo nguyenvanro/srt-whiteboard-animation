@@ -34,6 +34,7 @@ import numpy as np
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
 import stream_render as sr  # noqa: E402
+from finalize_video import add_finalization_args, finish_if_requested, validate_options
 
 DEFAULT_HAND = _SCRIPT_DIR.parent / "assets" / "drawing-hand.png"
 
@@ -402,7 +403,7 @@ class RegionStreamRenderer:
                         self._lay_ink_grid(writer, ink_frames, samples, pen_lifts, sample_cell, path, allowed)
                         centers = [self._cell_center(c) for c in path]
                     else:
-                        self._lay_ink(writer, ink_frames, [], set(), None, allowed)
+                        self._lay_ink(writer, ink_frames, [], set(), allowed)
                         centers = []
 
                 cur_ms += ink_frames * ms_per_frame
@@ -473,6 +474,7 @@ def _parse_args(argv=None):
     p.add_argument("--brush-radius", type=int, default=None)
     p.add_argument("--cap-long-edge", type=int, default=None,
                    help="输出长边像素上限（预览可调小加速，默认 1080）")
+    add_finalization_args(p)
     return p.parse_args(argv)
 
 
@@ -494,6 +496,11 @@ def _build_cfg(args) -> sr.Config:
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+    try:
+        validate_options(args)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[err] {exc}", file=sys.stderr)
+        return 1
     cfg = _build_cfg(args)
 
     print("=" * 56)
@@ -531,6 +538,11 @@ def main(argv=None) -> int:
 
     renderer.render_to(raw_path, total_ms)
     final = sr.transcode_h264(raw_path, out_path)
+    try:
+        final = finish_if_requested(final, out_path, args)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[err] Finalization failed; rendered video kept at {final}: {exc}", file=sys.stderr)
+        return 1
 
     size_mb = final.stat().st_size / (1024 * 1024)
     print(f"\n最终视频: {final}  ({size_mb:.2f} MB)")

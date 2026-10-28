@@ -11,20 +11,24 @@ ffmpeg 时，回退到 PyAV 逐帧重编码并缩放补边到第一段尺寸。�
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from finalize_video import add_finalization_args, finish_if_requested, validate_options
+from media_tools import ffmpeg_exe
+
 
 def _ffmpeg_concat_copy(inputs: list[Path], output: Path) -> bool:
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
+    try:
+        ffmpeg = ffmpeg_exe()
+    except RuntimeError:
         return False
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         for p in inputs:
-            f.write(f"file '{p.resolve().as_posix()}'\n")
+            escaped = p.resolve().as_posix().replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
         list_path = Path(f.name)
     try:
         res = subprocess.run(
@@ -87,7 +91,13 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="按顺序合并多幕白板动画 MP4")
     p.add_argument("--inputs", nargs="+", required=True, help="按播放顺序的 MP4 列表")
     p.add_argument("--output", required=True, help="合并输出路径")
+    add_finalization_args(p)
     args = p.parse_args(argv)
+    try:
+        validate_options(args)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[err] {exc}", file=sys.stderr)
+        return 1
 
     inputs = [Path(x) for x in args.inputs]
     missing = [str(x) for x in inputs if not x.exists()]
@@ -95,9 +105,17 @@ def main(argv=None) -> int:
         print(f"[err] 缺少输入文件: {', '.join(missing)}", file=sys.stderr)
         return 1
     output = Path(args.output)
+    if output.resolve() in [path.resolve() for path in inputs]:
+        print("[err] Output must differ from input scenes", file=sys.stderr)
+        return 1
     output.parent.mkdir(parents=True, exist_ok=True)
 
     if _ffmpeg_concat_copy(inputs, output) or _pyav_concat(inputs, output):
+        try:
+            finish_if_requested(output, output, args)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"[err] Finalization failed; merged video kept at {output}: {exc}", file=sys.stderr)
+            return 1
         print(f"OUTPUT={output.resolve()}")
         return 0
     print("[err] 合并失败：系统无 ffmpeg 且 PyAV 不可用", file=sys.stderr)

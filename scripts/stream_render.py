@@ -604,7 +604,8 @@ def _load_hand(path: Path, target_h: int) -> tuple[np.ndarray, np.ndarray] | Non
         _, mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
 
     # 裁到有效区
-    (x0, y0), (x1, y1) = _bounding_box(mask)
+    # Ignore nearly invisible alpha specks so the crop starts at the actual pen tip.
+    (x0, y0), (x1, y1) = _bounding_box((mask >= 16).astype(np.uint8))
     if x1 <= x0 or y1 <= y0:
         return None
     hand = hand[y0:y1 + 1, x0:x1 + 1]
@@ -1616,7 +1617,11 @@ def transcode_h264(src: Path, dst: Path) -> Path:
       3. 两者都没有：保留原始 mp4v 编码并告警
     """
     # 路径1：系统 ffmpeg（推荐，体积最优）
-    ffmpeg = shutil.which("ffmpeg")
+    from media_tools import ffmpeg_exe
+    try:
+        ffmpeg = ffmpeg_exe()
+    except RuntimeError:
+        ffmpeg = None
     if ffmpeg is not None:
         cmd = [
             ffmpeg, "-y", "-loglevel", "error",

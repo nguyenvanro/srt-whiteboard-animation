@@ -11,3 +11,9 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+*test*
+
+# Local narration and finalization outputs
+outputs/
+*.narration.wav

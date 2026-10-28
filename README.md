@@ -1,5 +1,7 @@
 # SRT 白板动画 Skill
 
+> **Bổ sung âm thanh và phụ đề:** xem phần [Giọng đọc và phụ đề](#giọng-đọc-và-phụ-đề) bên dưới.
+
 将 SRT 字幕转为按叙事顺序绘制的白板手绘视频Skill。它结合了**分区遮罩编排**与**流式笔迹绘制**：每个元素跟随字幕依次出场，笔尖在区域内连续落墨，再逐步添彩，最终导出 MP4。
 
 适合把知识讲解、故事口播、课程字幕或短视频文案制作成暖米黄色纸张底的手绘动画。
@@ -167,3 +169,89 @@ srt-whiteboard-animation/
 一个爱养鱼的老登 / AI Builder / 用 AI 团队打造一人公司。
 
 抖音、B站、公众号：江哥是老登啊
+
+## Giọng đọc và phụ đề
+
+Đã bổ sung tạo giọng đọc từ SRT, ghép file thuyết minh có sẵn và đốt phụ đề
+tiếng Việt vào MP4. Có thể dùng riêng từng chức năng hoặc dùng chung ngay trong
+lệnh render/ghép cảnh. Các lệnh cũ vẫn hoạt động khi không thêm tùy chọn mới.
+
+### Cài đặt trên Windows (PowerShell)
+
+```powershell
+python -X utf8 scripts/prepare_env.py
+$py = ".\.venv\Scripts\python.exe"
+```
+
+Trên macOS/Linux, dùng `.venv/bin/python` thay cho `$py` trong ví dụ bên dưới.
+Các thư viện mới gồm `edge-tts` và `imageio-ffmpeg`; FFmpeg đi kèm giúp máy không
+cần cài FFmpeg riêng. Nếu dùng FFmpeg hệ thống, bản đó phải có `libass` để đốt
+phụ đề. Có thể chọn executable qua biến môi trường `IMAGEIO_FFMPEG_EXE`.
+
+### Hoàn thiện video đã render
+
+Dùng file thuyết minh có sẵn (WAV/MP3/M4A…), bắt đầu từ giây 0 của video:
+
+```powershell
+& $py -X utf8 scripts/finalize_video.py --video animation.mp4 --audio narration.wav --srt subtitles.srt --burn-subtitles --output final.mp4
+```
+
+Tạo giọng đọc tiếng Việt từ SRT rồi ghép và đốt phụ đề:
+
+```powershell
+& $py -X utf8 scripts/finalize_video.py --video animation.mp4 --srt subtitles.srt --tts --voice vi-VN-HoaiMyNeural --burn-subtitles --output final.mp4
+```
+
+Chỉ đốt phụ đề, giữ âm thanh hiện có:
+
+```powershell
+& $py -X utf8 scripts/finalize_video.py --video animation.mp4 --srt subtitles.srt --burn-subtitles --font Arial --font-size 24 --subtitle-margin 24 --output final.mp4
+```
+
+Chỉ tạo file giọng đọc để nghe/chỉnh sửa trước:
+
+```powershell
+& $py -X utf8 scripts/generate_narration.py subtitles.srt narration.wav --voice vi-VN-NamMinhNeural --rate=+0%
+```
+
+`vi-VN-HoaiMyNeural` là lựa chọn mặc định; có thể đổi sang giọng khác do Edge TTS
+hỗ trợ. TTS cần Internet và gửi nội dung phụ đề đến dịch vụ Microsoft Edge;
+không cần API key. Dùng `--audio` để làm việc với bản thu sẵn mà không gọi TTS.
+Chỉ có `--srt` chưa làm phụ đề xuất hiện: phải thêm `--burn-subtitles`.
+
+### Tích hợp trong luồng render và ghép cảnh
+
+```powershell
+# Một cảnh: SRT có mốc thời gian tương đối từ đầu cảnh này.
+& $py -X utf8 scripts/render_stream_whiteboard.py scene.png scene.annotation.json scene.mp4 --srt scene.srt --tts --burn-subtitles
+
+# Nhiều cảnh: hoàn thiện sau khi ghép, sử dụng SRT của toàn video.
+& $py -X utf8 scripts/merge_scenes.py --inputs scene-01.mp4 scene-02.mp4 --output final.mp4 --srt full-video.srt --tts --burn-subtitles
+```
+
+SRT, thuyết minh và các cảnh cần dùng chung một timeline. Công cụ không tự sửa
+các mốc SRT theo annotation hoặc tự khôi phục khoảng trống giữa các cảnh.
+Khi ghép nhiều cảnh, tính mốc theo thời lượng thực tế của các MP4 (bao gồm thời
+gian dừng cuối cảnh), hoặc điều chỉnh thời lượng cảnh để khớp SRT gốc. Nên ghép
+các cảnh chưa có giọng đọc rồi thêm thuyết minh một lần ở bước cuối.
+
+### Quy tắc đồng bộ và xuất file
+
+- TTS đọc từng câu theo mốc SRT, giữ khoảng lặng ban đầu và giữa các câu. SRT
+  dùng cho TTS phải có thời lượng dương, thứ tự thời gian tăng và không chồng câu.
+- Câu quá dài được tăng tốc giữ cao độ để vừa khung thời gian. Mặc định giới hạn
+  `--max-speed 2.0`; vượt giới hạn sẽ báo lỗi để sửa câu/mốc thời gian, không cắt lời.
+  `--rate=+10%` thay đổi tốc độ giọng gốc trước khi căn thời gian.
+- Nếu âm thanh hoặc phụ đề dài hơn video, giữ khung hình cuối đến khi kết thúc.
+  Nếu âm thanh ngắn hơn video, bổ sung khoảng lặng đến hết video.
+- File thuyết minh mới thay thế âm thanh cũ của video. Nếu chỉ đốt phụ đề, âm
+  thanh cũ được giữ và mã hóa AAC. Bước hoàn thiện không tự cân loudness.
+- TTS xuất thêm `<tên-video>.narration.wav`. Tệp MP4 chỉ được thay thế sau khi
+  FFmpeg hoàn tất; khi hoàn thiện thất bại, bản render/ghép trước đó được giữ lại.
+- Không có thay đổi nào gửi lên GitHub khi chạy các lệnh này.
+
+Kiểm thử offline (không gọi dịch vụ TTS):
+
+```powershell
+& $py -X utf8 -m unittest discover -s tests -v
+```
